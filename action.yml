@@ -70,9 +70,11 @@ runs:
                 echo -e "- ❌ Revoking SSO access for SSH key:\n  - login: \`${login}\`\n  - Credential ID: \`${credential_id}\`\n  - SSH Key Title: \`${authorized_credential_title}\`\n  - SSH Key Fingerprint: \`${fingerprint}\`" >> $GITHUB_STEP_SUMMARY
 
 
-                if [ $dry_run == "false" ]; then                        
+                if [ $dry_run == "false" ]; then
+                    echo " ... revoking credential ..."
                     gh api -X DELETE "/orgs/${org}/credential-authorizations/${credential_id}"
                     if [ $create_issue == "true" ]; then
+                        echo " ... creating issue ..."
                         curl -Ls -X POST \
                           -H "Accept: application/vnd.github+json" \
                           -H "Authorization: Bearer ${{ github.token}}" https://api.github.com/repos/${issue_repo}/issues \
