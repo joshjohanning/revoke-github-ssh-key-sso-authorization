@@ -21,14 +21,14 @@ jobs:
     - uses: actions/create-github-app-token@v1
       id: app-token
       with:
-        app-id: ${{ vars.APP_ID }}
+        app-id: ${{ vars.APP_ID }} # use an app with `organization: admin write` permissions
         private-key: ${{ secrets.PRIVATE_KEY }}
         owner: ${{ github.repository_owner }}
     - name: Check and Revoke SSH keys
       uses: joshjohanning/revoke-github-ssh-key-sso-authorization@v1
       with:
         organization: ${{ github.repository_owner }}
-        github-token: ${{ steps.app-token.outputs.token }} # could also use PAT with `admin:org` scope
+        github-token: ${{ steps.app-token.outputs.token }} # use a PAT with `admin:org` permissions or a GitHub app token with org admin write permissions
         dry-run: false # change to true to not revoke any SSH keys
         create-issue: false # change to true to create an issue and assign to the user whose SSH key is being revoked (can't be used with dry-run)
         issue-repo: ${{ github.repository }} # if create-issue is true, repo to create the issue in
