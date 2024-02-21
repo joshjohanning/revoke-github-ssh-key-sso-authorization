@@ -1,18 +1,14 @@
-name: 'Enforce GitHub PAT Expiration for SSO Orgs'
+name: 'Revoke SSH key authorization policy'
 author: '@joshjohanning'
 branding:
   icon: 'rotate-cw'
   color: 'green'
-description: 'Revokes SSO authorization for PATs that do not meet the minimum expiration requirements'
+description: 'Revokes SSO authorization for SSH keys against an organization'
 inputs:
   organization:
-    description: 'The organization to check for SSO PATs'
+    description: 'The organization to check for SSO SSH keys'
     required: true
     default: '${{ github.repository_owner }}'
-  policy-in-days:
-    description: 'The maximum number of days a PAT can be valid for'
-    default: '90'
-    required: true
   github-token:
     description: 'The GitHub token to use for API calls (requiring org admin access)'
     required: true
@@ -21,7 +17,7 @@ inputs:
     default: 'false'
     required: false
   create-issue:
-    description: 'Create an issue notifying the user of the revoked PATs'
+    description: 'Create an issue notifying the user of the revoked SSH keys'
     default: 'false'
     required: false
   issue-repo:
@@ -31,17 +27,16 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: 'Check and revoke SSO authorization for PATs'
+    - name: 'Check and revoke SSO authorization for SSH keys'
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
       run: | 
-        echo "🔍 Getting credential authorizations for org: ${{ inputs.organization }}"
+        echo "🔍 Getting SSH key credential authorizations for org: ${{ inputs.organization }}"
         echo "🔍 Dry run: ${{ inputs.dry-run }}"
 
         org="${{ inputs.organization }}"
         dry_run="${{ inputs.dry-run }}"
-        policy_in_days="${{ inputs.policy-in-days }}"
         create_issue="${{ inputs.create-issue }}"
         issue_repo="${{ inputs.issue-repo }}"
 
@@ -61,58 +56,31 @@ runs:
                 echo "${item}" | base64 --decode | jq -r "${1}"
             }
             credential_type=$(_jq '.credential_type')
-            if [ "$credential_type" == "personal access token" ]; then
-                authorized_credential_expires_at=$(_jq '.authorized_credential_expires_at')
+            if [ "$credential_type" == "SSH key" ]; then
                 login=$(_jq '.login')
                 credential_id=$(_jq '.credential_id')
-                authorized_credential_note=$(_jq '.authorized_credential_note')
+                authorized_credential_title=$(_jq '.authorized_credential_title')
+                fingerprint=$(_jq '.fingerprint')
 
-                # Get the current date in seconds since the epoch
-                now=$(date +%s)
+                echo "❌ Revoking SSO access for SSH key:"
+                echo "     - login: ${login}"
+                echo "     - Credential ID: ${credential_id}"
+                echo "     - SSH Key Title: ${authorized_credential_title}"
+                echo "     - SSH Key Fingerprint: ${fingerprint}"
+                echo -e "- ❌ Revoking SSO access for SSH key:\n  - login: ${login}\n  - Credential ID: ${credential_id}\n  - SSH Key Title: ${authorized_credential_title}\n  - SSH Key Fingerprint: ${fingerprint}" >> $GITHUB_STEP_SUMMARY
 
-                # check if there is an expiration date set on PAT or not
-                if [ "$authorized_credential_expires_at" != "null" ]; then
-                    # Convert the authorized_credential_expires_at date to seconds since the epoch
-                    expires_at=$(date -d "${authorized_credential_expires_at}" +%s) # only works on linux / or on mac with gdate
-                    # expires_at=$(date -jf "%Y-%m-%dT%H:%M:%S.000Z" "${authorized_credential_expires_at}" +%s) # this is macOS, non-gnu date command ie gdate
 
-                    # Calculate the difference between the two dates in seconds
-                    diff=$((expires_at - now))
-
-                    # Calculate the number of days in the difference
-                    days=$((diff / 86400))
-                fi
-
-                # Check if the number of days meets the policy
-                if [ $days -gt $policy_in_days ] || [ "$authorized_credential_expires_at" == "null" ]; then
-                    echo "❌ Revoking SSO access for PAT:"
-                    echo "     - login: ${login}"
-                    echo "     - Credential ID: ${credential_id}"
-                    echo "     - Authorized Credential Expires At: ${authorized_credential_expires_at}"
-                    echo "     - Authorized Credential Note: ${authorized_credential_note}"
-                    echo -e "- ❌ Revoking SSO access for PAT:\n  - login: ${login}\n  - Credential ID: ${credential_id}\n  - Authorized Credential Expires At: ${authorized_credential_expires_at}\n  - Authorized Credential Note: ${authorized_credential_note}\n" >> $GITHUB_STEP_SUMMARY
-
-                    if [ $dry_run == "false" ]; then
-                        # revoke the credential
-                        if [ $dry_run == "false" ]; then                        
-                            gh api -X DELETE "/orgs/${org}/credential-authorizations/${credential_id}"
-                            if [ $create_issue == "true" ]; then
-                                curl -Ls -X POST \
-                                  -H "Accept: application/vnd.github+json" \
-                                  -H "Authorization: Bearer ${{ github.token}}" https://api.github.com/repos/${issue_repo}/issues \
-                                  -H "X-GitHub-Api-Version: 2022-11-28" \
-                                  -d "{\"title\":\"GitHub PAT revoked: $login\",\"body\":\"@$login, your GitHub PAT titled \`$authorized_credential_note\` with an expiration of \`$authorized_credential_expires_at\` has been revoked due to not meeting the minimum expiration requirements of $policy_in_days days. Please [create a new PAT](https://docs.github.com/en/github/authenticating-to-github/creating-a-personal-access-token) with an expiration date less than $policy_in_days days.\",\"assignees\":[\"$login\"]}"
-                            fi
-                        fi
-                    else
-                        echo "     - ⚠️ DRY RUN: not revoking credential"
+                if [ $dry_run == "false" ]; then                        
+                    gh api -X DELETE "/orgs/${org}/credential-authorizations/${credential_id}"
+                    if [ $create_issue == "true" ]; then
+                        curl -Ls -X POST \
+                          -H "Accept: application/vnd.github+json" \
+                          -H "Authorization: Bearer ${{ github.token}}" https://api.github.com/repos/${issue_repo}/issues \
+                          -H "X-GitHub-Api-Version: 2022-11-28" \
+                          -d "{\"title\":\"GitHub SSH key SSO authorization revoked: $login\",\"body\":\"@$login, your GitHub SSH key titled \`$authorized_credential_title\` with a fingerprint of \`$fingerprint\` has been revoked from accessing ${org}. Please use HTTPS or the `gh cli` to clone repositories instead.\",\"assignees\":[\"$login\"]}"
                     fi
                 else
-                    echo "✅ PAT meets requirements:"
-                    echo "     - login: ${login}"
-                    echo "     - Credential ID: ${credential_id}"
-                    echo "     - Authorized Credential Expires At: ${authorized_credential_expires_at}"
-                    echo "     - Authorized Credential Note: ${authorized_credential_note}"
+                    echo "     - ⚠️ DRY RUN: not revoking credential"
                 fi
             fi
         done
